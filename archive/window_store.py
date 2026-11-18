@@ -3,6 +3,9 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
 
+from archive.commitments import (
+    commit_frame, insert_slot_commitments, window_commitments_digest,
+)
 from archive.evidence import frame_evidence_digest, window_header_digest
 from archive.frame_store import insert_window_frames
 from archive.profile_store import ProfileStore
@@ -87,13 +90,20 @@ class WindowStore:
             ),
         )
         capture_id = cursor.lastrowid
+        commitments = tuple(
+            commit_frame(session, capture_id, frame) for frame in window.packet.frames
+        )
+        commitments_digest = window_commitments_digest(commitments)
         digest = window_header_digest(
-            session, capture_id, header, profile, window.totals, window.grade, frames_digest
+            session, capture_id, header, profile, window.totals, window.grade,
+            frames_digest, commitments_digest,
         )
         connection.execute(
-            'UPDATE windows SET header_digest = ? WHERE capture_id = ?', (digest, capture_id)
+            'UPDATE windows SET header_digest = ?, commitments_digest = ? WHERE capture_id = ?',
+            (digest, commitments_digest, capture_id),
         )
         insert_window_frames(connection, capture_id, window.packet.frames)
+        insert_slot_commitments(connection, capture_id, commitments)
         return CaptureReceipt(capture_id, window.totals, window.grade)
 
     def publish_window(self, window: PreparedWindow) -> CaptureReceipt:

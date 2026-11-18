@@ -6,6 +6,7 @@ from os import PathLike
 from pathlib import Path
 
 from archive.profile_store import ProfileStore
+from archive.readback import ArchiveVerificationError
 from archive.schema import open_archive_connection
 from archive.window_store import WindowStore
 from camera.profiles import ProfileRegistry
@@ -110,6 +111,76 @@ def _demo() -> None:
                 raise AssertionError('reopened packets disagree with camera input')
 
 
+def _demo_recovery() -> None:
+    from samples.recovery_fixture import capture_sample, damage_original
+
+    def slot_record(slot):
+        frame = None
+        if slot.frame is not None:
+            frame = [list(slot.frame.payload), slot.frame.origin.camera,
+                     slot.frame.origin.device, slot.frame.origin.position]
+        donor = None if slot.donor is None else list(slot.donor)
+        return [slot.slot, slot.status.value, frame, donor]
+
+    with tempfile.TemporaryDirectory(prefix='strip-recovery-') as directory:
+        database = Path(directory) / 'recovery.sqlite3'
+        with Station(database) as station:
+            ids = capture_sample(station)
+            damage_original(station.connection, ids['target'], 4, bytes([11, 29]))
+            damage_original(station.connection, ids['neighbor-damage'], 33, bytes([90, 0]))
+
+        with Station(database) as station:
+            refused = []
+            for label in ('target', 'neighbor-damage'):
+                try:
+                    station.windows.read_window('A', ids[label])
+                except ArchiveVerificationError:
+                    refused.append(label)
+            if refused != ['target', 'neighbor-damage']:
+                raise AssertionError('strict reads must refuse the damaged windows')
+            report = station.review.recover_window('A', ids['target'])
+            _scenario(
+                'recovery_substitution_case',
+                {'session': 'A', 'capture_id': ids['target'],
+                 'damaged_slots': [[ids['target'], 4], [ids['neighbor-damage'], 33]],
+                 'strict_read_refused': refused},
+                [[4, 'substituted', [[10, 30], 'C1', 'head-left', 401], [3, 32]],
+                 [5, 'original', [[0, 20], 'C1', 'head-left', 402], None]],
+                [slot_record(slot) for slot in report.slots],
+                [60, 4, 'dark'],
+                [report.totals.gray_sum, report.totals.pixel_count, report.grade.value],
+                ['archive/commitments.py', 'review/recovery.py'],
+                'slot 4 is proven by the sealed original of window 3 slot 32; window 2 '
+                'slot 20 reverses the bytes and slot 21 moves the position, so the '
+                'smallest eligible donor is (3, 32)',
+            )
+            damage_original(station.connection, ids['target'], 5, b'')
+            report = station.review.recover_window('A', ids['target'])
+            totals = None
+            if report.totals is not None:
+                totals = [report.totals.gray_sum, report.totals.pixel_count, report.grade.value]
+            _scenario(
+                'recovery_unverified_case',
+                {'session': 'A', 'capture_id': ids['target'],
+                 'damaged_slots': [[ids['target'], 4], [ids['target'], 5],
+                                   [ids['neighbor-damage'], 33]]},
+                [[4, 'substituted', [[10, 30], 'C1', 'head-left', 401], [3, 32]],
+                 [5, 'unverified', None, None]],
+                [slot_record(slot) for slot in report.slots],
+                None, totals,
+                ['archive/commitments.py', 'review/recovery.py'],
+                'with the slot 5 bytes destroyed and no sealed donor for them, the slot '
+                'stays unverified and the window totals and grade are withheld',
+            )
+        print('交接说明：新窗封存时原帧与逐槽承诺在同一事务提交；承诺固定班次、窗口、绝对槽、'
+              '出处、宽高与原字节身份，原帧字节局部损坏后承诺仍可核验，重开与重投不补造旧窗承诺。')
+        print('交接说明：复核领取时目标槽优先交付可核验的封存原件；原件损坏时，候选槽是同班次'
+              '另一窗口中封存归属与实际原件均核验通过的帧，交付帧改用目标绝对槽号并兑现目标承诺'
+              '的出处、形状与字节，合格替代按窗口号、候选槽取最小。')
+        print('交接说明：恢复只读，恢复报告不充当候选；严格读取与交班不借用替代结果，'
+              '任一槽未证时不交付整窗计量与分级。')
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description='Offline strip inspection handover')
     parser.add_argument('action', choices=('verify', 'demo'))
@@ -117,6 +188,7 @@ def main() -> int:
     if args.action == 'verify':
         return _verify()
     _demo()
+    _demo_recovery()
     return 0
 
 

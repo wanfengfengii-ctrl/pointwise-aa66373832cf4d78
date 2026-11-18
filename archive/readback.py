@@ -59,7 +59,8 @@ def _decode_summary(row: sqlite3.Row) -> WindowSummary:
     if totals.pixel_count != expected_count:
         raise ValueError('fixed pixel count disagrees with the slot interval and frame shape')
     expected_digest = window_header_digest(
-        row['session'], row['capture_id'], header, profile, totals, grade, row['frames_digest'],
+        row['session'], row['capture_id'], header, profile, totals, grade,
+        row['frames_digest'], row['commitments_digest'],
     )
     if expected_digest != row['header_digest']:
         raise ValueError('fixed window header digest mismatch')
@@ -72,7 +73,11 @@ class WindowReader:
     def __init__(self, connection: sqlite3.Connection) -> None:
         self._connection = connection
 
-    def _read_summary(self, session: str, capture_id: int) -> WindowSummary | None:
+    @property
+    def connection(self) -> sqlite3.Connection:
+        return self._connection
+
+    def read_summary(self, session: str, capture_id: int) -> WindowSummary | None:
         if type(capture_id) is not int or not 0 < capture_id < 1 << 63:
             return None
         row = self._connection.execute(
@@ -90,14 +95,14 @@ class WindowReader:
             raise SessionBindingError(f'unknown session {session!r}')
         summaries = []
         for capture_id in list_session_capture_ids(self._connection, session):
-            summary = self._read_summary(session, capture_id)
+            summary = self.read_summary(session, capture_id)
             if summary is None:
                 raise ArchiveVerificationError(f'catalogued window {session!r}/{capture_id} is missing')
             summaries.append(summary)
         return tuple(summaries)
 
     def read_window(self, session: str, capture_id: int) -> ArchivedWindow | None:
-        summary = self._read_summary(session, capture_id)
+        summary = self.read_summary(session, capture_id)
         if summary is None:
             return None
         try:

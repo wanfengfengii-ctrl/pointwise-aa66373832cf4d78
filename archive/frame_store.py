@@ -42,3 +42,20 @@ def load_window_frames(connection: sqlite3.Connection, capture_id: int) -> tuple
             GrayFrame(decode_natural(slot), decode_natural(width), decode_natural(height), payload, origin)
         )
     return tuple(frames)
+
+
+def load_frame_at_slot(
+    connection: sqlite3.Connection, capture_id: int, slot: int
+) -> GrayFrame | None:
+    row = connection.execute(
+        '''SELECT slot, width, height, payload, origin_camera, device, position
+           FROM frames WHERE capture_id = ? AND slot = ?''',
+        (capture_id, encode_natural(slot)),
+    ).fetchone()
+    if row is None:
+        return None
+    origin = FrameOrigin(row['origin_camera'], row['device'], decode_natural(row['position']))
+    return GrayFrame(
+        decode_natural(row['slot']), decode_natural(row['width']),
+        decode_natural(row['height']), row['payload'], origin,
+    )

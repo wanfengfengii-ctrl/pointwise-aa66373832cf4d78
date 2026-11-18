@@ -1,7 +1,20 @@
 import sqlite3
 from os import PathLike
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
+
+_SLOT_COMMITMENTS_SCHEMA = '''CREATE TABLE slot_commitments (
+           capture_id INTEGER NOT NULL REFERENCES windows (capture_id),
+           slot TEXT NOT NULL,
+           width TEXT NOT NULL,
+           height TEXT NOT NULL,
+           origin_camera TEXT NOT NULL,
+           device TEXT NOT NULL,
+           position TEXT NOT NULL,
+           payload_digest TEXT NOT NULL,
+           commitment_digest TEXT NOT NULL,
+           PRIMARY KEY (capture_id, slot)
+       )'''
 
 _SCHEMA = (
     '''CREATE TABLE profiles (
@@ -35,6 +48,7 @@ _SCHEMA = (
            grade TEXT NOT NULL CHECK (grade IN ('dark', 'pass')),
            frames_digest TEXT NOT NULL,
            header_digest TEXT NOT NULL,
+           commitments_digest TEXT,
            UNIQUE (session, packet_id)
        )''',
     '''CREATE TABLE frames (
@@ -50,8 +64,16 @@ _SCHEMA = (
            PRIMARY KEY (capture_id, ordinal),
            UNIQUE (capture_id, slot)
        )''',
+    _SLOT_COMMITMENTS_SCHEMA,
     'CREATE INDEX windows_session_capture ON windows (session, capture_id)',
 )
+
+_MIGRATIONS = {
+    1: (
+        'ALTER TABLE windows ADD COLUMN commitments_digest TEXT',
+        _SLOT_COMMITMENTS_SCHEMA,
+    ),
+}
 
 
 def encode_natural(value: int) -> str:
@@ -77,13 +99,17 @@ def initialize_archive(connection: sqlite3.Connection) -> None:
     version = _schema_version(connection)
     if version == SCHEMA_VERSION:
         return
-    if version != 0:
+    if version != 0 and version not in _MIGRATIONS:
         raise sqlite3.DatabaseError(f'unsupported archive schema version {version}')
     connection.execute('BEGIN IMMEDIATE')
     try:
         version = _schema_version(connection)
         if version == 0:
             for statement in _SCHEMA:
+                connection.execute(statement)
+            connection.execute(f'PRAGMA user_version = {SCHEMA_VERSION}')
+        elif version in _MIGRATIONS:
+            for statement in _MIGRATIONS[version]:
                 connection.execute(statement)
             connection.execute(f'PRAGMA user_version = {SCHEMA_VERSION}')
         elif version != SCHEMA_VERSION:

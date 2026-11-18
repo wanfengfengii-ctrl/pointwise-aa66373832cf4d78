@@ -34,12 +34,16 @@ def frame_evidence_digest(frames: Iterable[GrayFrame]) -> str:
 def window_header_digest(
     session: str, capture_id: int, header: PacketHeader, profile: ProfileRevision,
     totals: LuminanceTotals, grade: WindowGrade, frames_digest: str,
+    commitments_digest: str | None = None,
 ) -> str:
-    return hashlib.sha256(_encode((
-        'window-header-v1', session, capture_id, header.packet_id, header.camera,
+    fields = (
+        session, capture_id, header.packet_id, header.camera,
         encode_natural(header.trigger_slot), encode_natural(header.first_slot),
         encode_natural(header.last_slot), profile.key.camera, profile.key.revision,
         encode_natural(profile.spec.width), encode_natural(profile.spec.height),
         profile.threshold, encode_natural(totals.gray_sum), encode_natural(totals.pixel_count),
         grade.value, frames_digest,
-    ))).hexdigest()
+    )
+    if commitments_digest is None:
+        return hashlib.sha256(_encode(('window-header-v1', *fields))).hexdigest()
+    return hashlib.sha256(_encode(('window-header-v2', *fields, commitments_digest))).hexdigest()

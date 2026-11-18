@@ -4,6 +4,7 @@ from archive.window_store import WindowStore
 from camera.profiles import ProfileRevision
 from inspection.grading import WindowGrade
 from inspection.luminance import LuminanceTotals
+from review import recovery
 from review.query import ReviewQuery
 from review.selection import select_windows
 from review.verify import verify_window
@@ -42,3 +43,7 @@ class HandoverService:
                     verified.totals, verified.grade, verified.origins,
                 ))
             return report
+
+    def recover_window(self, session: str, capture_id: int) -> recovery.RecoveryReport | None:
+        with self._windows.read_snapshot() as reader:
+            return recovery.recover_window(reader, session, capture_id)

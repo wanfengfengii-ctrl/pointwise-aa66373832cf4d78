@@ -21,6 +21,10 @@
 
 原包身份为班次和包号。原样重投复用窗口编号、统计和分级，包含帧形状、原始字节及每帧设备出处在内的任一内容改动均构成冲突。归档写入失败回滚本次新窗。已发布窗口的固定摘要覆盖身份、区间、配置、统计、分级和帧摘要，帧摘要独立覆盖帧顺序、样本槽、原字节和出处。按号领取时检查两层摘要及密集布局。交班在同一读快照内先检查本班次固定摘要，再检查和复算选中窗口。任一核验失败时整次交班报错。报告按整数触发槽、窗口号排序，同触发槽的独立窗口均保留。
 
+## 逐槽恢复
+
+相机停用后，新窗封存的原帧与逐槽承诺在同一事务提交；承诺固定班次、窗口、绝对槽、出处、宽高与原字节身份，原帧字节局部损坏后承诺仍可核验。`station.review.recover_window` 在同一归档读快照内按目标绝对槽交付原样、替代或未证：替代帧来自同班次另一窗口封存并实际读得、核验通过的原件，兑现目标槽承诺的出处、形状和字节，合格者按窗口号、候选槽取最小。恢复只读，不修复回写，恢复报告不充当候选；V1 旧档沿用整窗证据规则。详见 RECOVERY.md。
+
 ## Python API
 
 需要 Python 3.11 标准库。`Station` 实例拥有一条 SQLite 连接，独立读者可另开实例。关闭或重开数据库保留已登记修订、班次和窗口。
@@ -49,6 +53,7 @@ with Station('shift.sqlite3') as station:
 - `capture_packet(session, packet)` 返回 `CaptureReceipt`。不合格包抛出 `AdmissionError`，同号异文抛出 `PacketConflictError`，SQLite 写入错误传给调用者。
 - `read_window(session, capture_id)` 返回 `ArchivedWindow` 或 `None`。证据损坏抛出 `ArchiveVerificationError`。
 - `handover(session, dark_only)` 返回 `HandoverEntry` 列表。合法空班次返回空列表，未知班次抛出 `SessionBindingError`，证据损坏抛出 `ArchiveVerificationError`。
+- `recover_window(session, capture_id)` 返回 `RecoveryReport` 或 `None`。目标固定头或应有逐槽承诺损坏抛出 `ArchiveVerificationError`；任一槽未证时 `totals` 和 `grade` 为 `None`。恢复只读。
 
 回放文件为 UTF-8 JSON Lines，每行一包。包字段为 `camera`、`packet_id`、`trigger_slot`、`first_slot`、`last_slot` 和 `frames`。每帧含 `slot`、`width`、`height`、`gray_hex` 和 `origin`。`gray_hex` 每两位表示一个原字节，`origin` 含 `camera`、`device`、`position`。调用方也可直接构造 `PacketHeader`、`SourcePacket`、`GrayFrame` 和 `FrameOrigin`。
 
